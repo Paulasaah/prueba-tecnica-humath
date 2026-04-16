@@ -6,5 +6,5 @@ coverage/
 !.env.example
 *.log
 .DS_Store
-docs/
-AGENTS.md
+*.md
+!README.md

@@ -4,9 +4,15 @@ import helmet from 'helmet';
 import compression from 'compression';
 import pinoHttp from 'pino-http';
 import rateLimit from 'express-rate-limit';
+import swaggerUi from 'swagger-ui-express';
+import { randomUUID } from 'node:crypto';
 import { logger } from './common/logger';
 import { errorHandler } from './common/error-handler';
 import { AppDataSource } from './common/database';
+import { openApiSpec } from './common/swagger';
+import { authRouter } from './modules/auth/auth.module';
+import { marketRouter } from './modules/market/market.module';
+import { MarketController } from './modules/market/market.controller';
 
 export function createApp(): Express {
   const app = express();
@@ -28,8 +34,7 @@ export function createApp(): Express {
   app.use(
     pinoHttp({
       logger,
-      genReqId: (req) =>
-        req.headers['x-request-id']?.toString() ?? crypto.randomUUID(),
+      genReqId: (req) => req.headers['x-request-id']?.toString() ?? randomUUID(),
     }),
   );
 
@@ -45,6 +50,13 @@ export function createApp(): Express {
       res.status(503).json({ status: 'degraded' });
     }
   });
+
+  const marketCtrl = new MarketController();
+  app.get('/external-data', marketCtrl.externalData);
+
+  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
+  app.use('/api/auth', authRouter());
+  app.use('/api/market', marketRouter());
 
   app.use(errorHandler);
   return app;
