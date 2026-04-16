@@ -22,7 +22,9 @@ export function createApp(): Express {
       contentSecurityPolicy: false,
       crossOriginEmbedderPolicy: false,
       crossOriginOpenerPolicy: false,
+      crossOriginResourcePolicy: false,
       originAgentCluster: false,
+      hsts: false,
     }),
   );
   app.use(cors());
