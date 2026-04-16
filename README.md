@@ -1,228 +1,254 @@
-# Alpha Vantage REST API
+# Prueba Técnica Humath · Backend
 
-REST API en **Node.js + TypeScript + Express** que consume [Alpha Vantage](https://www.alphavantage.co/) y expone endpoints de finanzas transformados, con autenticación JWT, persistencia en Neon (Postgres), cache en memoria, documentación Swagger, validación Zod y despliegue automatizado a Azure App Service for Containers.
-
-## Stack
-- **Runtime**: Node.js 20 LTS
-- **Package manager**: pnpm 9 (via corepack)
-- **HTTP framework**: Express
-- **Cliente API pública**: Axios (instancia única con cache)
-- **ORM**: TypeORM
-- **DB**: Neon (PostgreSQL serverless)
-- **Auth**: JWT + bcrypt
-- **Validación**: Zod
-- **Logging**: Pino + request IDs
-- **Docs API**: Swagger UI (`/api/docs`)
-- **Tests**: Jest + ts-jest + supertest
-- **Contenedor**: Docker multi-stage (node:20-alpine)
-- **CI/CD**: GitHub Actions → Azure App Service for Containers
+REST API construida en **Node.js + Express + TypeScript** que consume [Alpha Vantage](https://www.alphavantage.co/) y expone un endpoint propio con datos transformados. Incluye autenticación JWT, validación con Zod, cache en memoria, persistencia con TypeORM, documentación Swagger UI, tests con Jest, contenedor Docker y despliegue automatizado a Azure App Service.
 
 ## Qué hace el proyecto
-Expone un conjunto de endpoints REST autenticados con JWT que consultan Alpha Vantage (datos de acciones, forex, cripto, noticias, indicadores técnicos), transforman la respuesta cruda a DTOs limpios en camelCase y opcionalmente cachean el resultado para respetar el rate-limit gratuito del proveedor.
+
+Cumple el enunciado de la prueba: consume una API pública externa (Alpha Vantage), transforma la respuesta a un formato propio en JSON y la expone en un endpoint HTTP. Como plus, añade auth JWT, cache en memoria para respetar el rate-limit gratuito de Alpha Vantage, Swagger UI, logging estructurado con request IDs, validación de entrada con Zod, tests unitarios y CI/CD completo.
+
+## Stack
+
+| Capa | Tecnología |
+|------|-----------|
+| Runtime | Node.js 20 LTS |
+| Package manager | pnpm 9 (via corepack) |
+| Framework | Express 5 |
+| Lenguaje | TypeScript strict |
+| Cliente HTTP externo | Axios (single instance con cache) |
+| ORM | TypeORM |
+| DB | PostgreSQL (Neon serverless en cloud, postgres:16 en local) |
+| Auth | JWT + bcrypt |
+| Validación | Zod |
+| Logging | Pino + pino-http |
+| Docs API | Swagger UI |
+| Tests | Jest + ts-jest + supertest |
+| Contenedor | Docker multi-stage (node:20-alpine) |
+| CI/CD | GitHub Actions → Azure App Service for Containers |
 
 ## Cómo ejecutarlo localmente
 
+### Opción A · Node directo
+
 ```bash
-# 1. Prerequisitos
-node --version                 # >= 20
 corepack enable && corepack prepare pnpm@9 --activate
-
-# 2. Instalar + variables
 pnpm install
-cp .env.example .env           # completar DATABASE_URL, ALPHA_VANTAGE_KEY, JWT_SECRET
-
-# 3. Levantar
+cp .env.example .env
 pnpm dev
+```
+
+Verificar:
+
+```bash
 curl http://localhost:3000/health
+curl http://localhost:3000/external-data
 open http://localhost:3000/api/docs
 ```
 
-### Con Docker
+### Opción B · Docker Compose (DB + API incluidas)
+
 ```bash
+export ALPHA_VANTAGE_KEY=tu_api_key
+export JWT_SECRET=$(openssl rand -hex 32)
 docker compose up --build
 ```
 
-## Variables de entorno (mínimas)
+## API externa consumida
+
+[Alpha Vantage](https://www.alphavantage.co/documentation/) — datos financieros (quote, time-series, top movers). Plan gratuito: 5 req/min, 500 req/día. El cache en memoria (node-cache, TTL 60s) mitiga el rate-limit.
+
+## Endpoints implementados
+
+| Método | Ruta | Auth | Descripción |
+|--------|------|------|-------------|
+| GET | `/health` | — | Liveness |
+| GET | `/ready` | — | Readiness (chequea DB) |
+| GET | `/api/docs` | — | Swagger UI |
+| GET | `/external-data` | — | Endpoint del enunciado: top-movers transformados |
+| POST | `/api/auth/register` | — | Registro de usuario |
+| POST | `/api/auth/login` | — | Login, retorna JWT |
+| GET | `/api/auth/me` | JWT | Perfil del usuario |
+| GET | `/api/market/quote/:symbol` | JWT | Cotización (GLOBAL_QUOTE) |
+| GET | `/api/market/daily/:symbol` | JWT | Serie diaria (TIME_SERIES_DAILY) |
+
+### Ejemplo de respuesta de `/external-data`
+
+```json
+[
+  { "id": 1, "name": "AAPL", "priceChange": 3.25, "changePercent": "1.2%" },
+  { "id": 2, "name": "TSLA", "priceChange": 5.50, "changePercent": "2.5%" }
+]
+```
+
+## Variables de entorno
+
+Ver `.env.example`. Las mínimas:
+
 ```env
 PORT=3000
-DATABASE_URL=postgresql://user:pass@host/db?sslmode=require
+NODE_ENV=development
+DATABASE_URL=postgresql://user:pass@host:5432/db?sslmode=require
+DB_SSL=true
 ALPHA_VANTAGE_KEY=tu_api_key
 ALPHA_VANTAGE_BASE_URL=https://www.alphavantage.co/query
-JWT_SECRET=un_secreto_largo
+JWT_SECRET=un_secreto_largo_y_aleatorio
+BCRYPT_ROUNDS=12
 ```
-Ver `.env.example` para la lista completa.
 
-## API externa consumida
-**[Alpha Vantage](https://www.alphavantage.co/documentation/)** — datos financieros (quote, time-series, forex, crypto, fundamentales, news sentiment, indicadores técnicos). Plan gratuito: 5 req/min, 500 req/día. El cache en memoria mitiga el rate-limit en el camino caliente.
+## Arquitectura (separación por módulos)
 
-## Documentación paso a paso
-Ver [`AGENTS.md`](AGENTS.md) y la carpeta [`docs/`](docs/):
+```
+src/
+  common/
+    database.ts          DataSource TypeORM
+    errors.ts            Clases de error (AppError, NotFoundError, ...)
+    error-handler.ts     Middleware global
+    logger.ts            Pino
+    cache.ts             node-cache
+    http-client.ts       Axios wrapper (única instancia)
+    validate.ts          Middleware Zod
+    swagger.ts           OpenAPI 3.0 spec
+  modules/
+    auth/
+      auth.entity.ts     User (TypeORM)
+      auth.dto.ts        Zod schemas
+      auth.service.ts    bcrypt + JWT
+      auth.controller.ts Handlers HTTP
+      auth.module.ts     Router Express
+      jwt.middleware.ts  Guard JWT
+    market/
+      market.entity.ts   MarketQueryLog (auditoría)
+      market.dto.ts      Zod schemas + DTOs
+      market.service.ts  Consume Alpha Vantage + transforma
+      market.controller.ts
+      market.module.ts
+  app.ts                 Setup Express
+  index.ts               Entry point (bootstrap + graceful shutdown)
+tests/
+  *.spec.ts              Jest (mock-first)
+```
 
-- [`00-plan-de-entrega.md`](docs/00-plan-de-entrega.md) — Priorización para prueba de 8h
-- [`01-setup-inicial.md`](docs/01-setup-inicial.md)
-- [`02-node-express-pnpm.md`](docs/02-node-express-pnpm.md)
-- [`03-typeorm-neon.md`](docs/03-typeorm-neon.md)
-- [`04-autenticacion-jwt.md`](docs/04-autenticacion-jwt.md)
-- [`05-axios-alpha-vantage.md`](docs/05-axios-alpha-vantage.md)
-- [`06-endpoints-finanzas.md`](docs/06-endpoints-finanzas.md)
-- [`07-testing-jest.md`](docs/07-testing-jest.md)
-- [`08-docker.md`](docs/08-docker.md)
-- [`09-azure-deploy.md`](docs/09-azure-deploy.md)
-- [`10-github-actions-workflow.md`](docs/10-github-actions-workflow.md)
-- [`11-features-destacadas.md`](docs/11-features-destacadas.md)
+## Testing
 
-## Endpoints (resumen)
+```bash
+pnpm test
+pnpm test:watch
+```
 
-### Auth
-| Método | Ruta | Auth |
-|--------|------|------|
-| POST | `/api/auth/register` | — |
-| POST | `/api/auth/login` | — |
-| GET | `/api/auth/me` | JWT |
+Cubre: `AuthService` (register/login con JWT real), `MarketService` (transformación DTO + NotFoundError), endpoints `/health`, `/ready`, `/api/docs`.
 
-### Market / Finanzas
-| Método | Ruta | Auth |
-|--------|------|------|
-| GET | `/api/market/quote/:symbol` | JWT |
-| GET | `/api/market/search?q=` | JWT |
-| GET | `/api/market/overview/:symbol` | JWT |
-| GET | `/api/market/daily/:symbol` | JWT |
-| GET | `/api/market/intraday/:symbol` | JWT |
-| GET | `/api/market/top-movers` | JWT |
-| GET | `/api/market/forex/:from/:to` | JWT |
-| GET | `/api/market/crypto/:symbol/:market` | JWT |
-| GET | `/api/market/news?tickers=` | JWT |
-| GET | `/api/market/earnings/:symbol` | JWT |
-| GET | `/api/market/indicators/:symbol/sma` | JWT |
-| GET | `/api/market/indicators/:symbol/rsi` | JWT |
+## Docker
 
-### Meta
-| Método | Ruta | Descripción |
-|--------|------|-------------|
-| GET | `/health` | Liveness |
-| GET | `/ready` | Readiness (DB) |
-| GET | `/api/docs` | Swagger UI |
+Multi-stage (`deps` → `build` → `runtime`) sobre `node:20-alpine`, usuario no-root, healthcheck integrado.
 
-Detalle en [`docs/06-endpoints-finanzas.md`](docs/06-endpoints-finanzas.md).
+```bash
+docker build -t prueba-tecnica-humath .
+docker run -p 3000:3000 --env-file .env prueba-tecnica-humath
+```
 
 ## Despliegue en Azure
-Despliegue automático vía **GitHub Actions → Azure App Service for Containers**. El workflow corre tests, construye la imagen, la publica a GHCR y deploya. Detalles en [`docs/09-azure-deploy.md`](docs/09-azure-deploy.md) y [`docs/10-github-actions-workflow.md`](docs/10-github-actions-workflow.md).
+
+Despliegue automático vía GitHub Actions → Azure App Service for Containers. El workflow `deploy-azure.yml` se dispara con push a `main`:
+
+1. Build y test en runner Ubuntu.
+2. Construye imagen Docker y la publica en GHCR (`ghcr.io/paulasaah/prueba-tecnica-humath`).
+3. Deploya el contenedor a Azure Web App (`azure/webapps-deploy@v3`).
+4. Smoke test contra `/health`.
+
+### Setup único en Azure
+
+```bash
+az group create -n paula-rg -l eastus
+az appservice plan create -g paula-rg -n paula-plan --is-linux --sku B1
+az webapp create -g paula-rg -p paula-plan -n prueba-tecnica-humath \
+  --deployment-container-image-name ghcr.io/paulasaah/prueba-tecnica-humath:latest
+
+az webapp config appsettings set -g paula-rg -n prueba-tecnica-humath --settings \
+  NODE_ENV=production \
+  DATABASE_URL="postgresql://..." \
+  ALPHA_VANTAGE_KEY="..." \
+  JWT_SECRET="..." \
+  WEBSITES_PORT=3000
+```
+
+### Secrets requeridos en GitHub
+
+- `AZURE_APP_NAME` — nombre del Web App (`prueba-tecnica-humath`)
+- `AZURE_PUBLISH_PROFILE` — publish profile descargado del portal Azure
+
+### URL pública
+
+`https://prueba-tecnica-humath.azurewebsites.net`
 
 ---
 
-## Almacenamiento de Archivos con Azure Blob + SAS (Documentación — NO implementado)
+## Almacenamiento de archivos en Azure Blob + SAS (diseño, no implementado)
 
-> **Nota**: la prueba menciona "carga de archivos a un storage de Azure manejando SAS". Esta sección describe el diseño completo **sin implementarlo** — la decisión fue enfocar las 8h en la calidad del core (API + auth + cache + Swagger + CI/CD real).
->
-> Aunque se hable de "S3", el equivalente en Azure es **Azure Blob Storage** y las URLs firmadas se llaman **SAS (Shared Access Signature)**. En AWS serían *Presigned URLs*. El concepto es el mismo: URL temporal con permisos acotados que el cliente usa directo sin exponer las claves del bucket.
+La prueba menciona "carga de archivos a un storage de Azure manejando SAS". Esta sección documenta el diseño sin implementarlo.
 
-### ¿Qué es SAS?
-Un **Shared Access Signature** es un token criptográfico anexado a la URL de un recurso (blob, contenedor, cola, tabla) que:
-- Define **qué operaciones** permite (`read`, `write`, `create`, `delete`, `list`).
-- Tiene **expiración** (ej. 5–15 min).
-- Opcionalmente restringe por **IP de origen** y **protocolo** (HTTPS).
-- **No requiere exponer la storage account key** al cliente.
+### Qué es SAS
 
-### Flujo de upload (cliente → backend → blob)
+Un Shared Access Signature es un token firmado que:
+
+- Define qué operaciones permite (`read`, `write`, `create`, `delete`, `list`).
+- Tiene expiración (5–15 min recomendado).
+- Opcionalmente restringe por IP y protocolo (HTTPS).
+- No expone la storage account key al cliente.
+
+### Flujo de upload
 
 ```
-[cliente]                [backend Express]             [Azure Blob]
-   │                           │                            │
-   │  1. POST /api/storage/    │                            │
-   │     upload-url            │                            │
-   │  (nombre archivo, mime)   │                            │
-   │  + JWT                    │                            │
-   │ ─────────────────────────►│                            │
-   │                           │ 2. generar SAS write       │
-   │                           │    (5–15 min, solo write)  │
-   │                           │◄── storage key (server)    │
-   │                           │                            │
-   │  3. { uploadUrl, blobUrl }│                            │
-   │◄──────────────────────────│                            │
-   │                           │                            │
-   │  4. PUT binario directo al blob (x-ms-blob-type: BlockBlob)
-   │ ──────────────────────────────────────────────────────►│
-   │                           │                            │
-   │  5. POST /api/storage/confirm (blobUrl)                │
-   │ ─────────────────────────►│                            │
-   │                           │ 6. guardar metadata en DB  │
-   │                           │    (userId, blobUrl, size) │
+[cliente]                  [backend]                      [Azure Blob]
+    |                          |                                |
+    |  1. POST /api/storage    |                                |
+    |     /upload-url (JWT)    |                                |
+    |------------------------->|                                |
+    |                          | 2. generar SAS write           |
+    |                          |    (15 min, solo write)        |
+    |  3. { uploadUrl, blobUrl }                                |
+    |<-------------------------|                                |
+    |                                                           |
+    |  4. PUT binario directo al blob firmado                   |
+    |---------------------------------------------------------->|
+    |                          |                                |
+    |  5. POST /api/storage/confirm (blobUrl)                   |
+    |------------------------->|                                |
+    |                          | 6. persistir metadata DB       |
 ```
 
-### Pasos de implementación (cuando se retome)
+### Implementación (pseudocódigo)
 
-1. **Crear Storage Account + contenedor privado**:
-   ```bash
-   az storage account create -g paula-rg -n paulastorage -l eastus --sku Standard_LRS
-   az storage container create --account-name paulastorage -n uploads --public-access off
-   ```
+```typescript
+import {
+  BlobSASPermissions, BlobServiceClient,
+  generateBlobSASQueryParameters, SASProtocol,
+} from '@azure/storage-blob';
 
-2. **Obtener connection string** (secret `AZURE_STORAGE_CONNECTION_STRING`):
-   ```bash
-   az storage account show-connection-string -g paula-rg -n paulastorage
-   ```
+const svc = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING!);
+const container = svc.getContainerClient('uploads');
+const blobName = `${userId}/${crypto.randomUUID()}-${filename}`;
+const blob = container.getBlobClient(blobName);
 
-3. **Instalar SDK**:
-   ```bash
-   pnpm add @azure/storage-blob
-   ```
+const sas = generateBlobSASQueryParameters({
+  containerName: 'uploads',
+  blobName,
+  permissions: BlobSASPermissions.parse('cw'),
+  startsOn: new Date(Date.now() - 60_000),
+  expiresOn: new Date(Date.now() + 15 * 60_000),
+  protocol: SASProtocol.Https,
+}, svc.credential).toString();
 
-4. **Módulo `storage`** (dos endpoints):
-   - `POST /api/storage/upload-url` → genera SAS **write** con expiración corta y devuelve `uploadUrl` + `blobUrl`.
-   - `POST /api/storage/confirm` → el cliente notifica fin de upload; el backend persiste metadata (`userId`, `blobName`, `size`, `contentType`).
+return { uploadUrl: `${blob.url}?${sas}`, blobUrl: blob.url };
+```
 
-5. **Generar SAS** (pseudocódigo de `storage.service.ts`):
-   ```typescript
-   import {
-     BlobSASPermissions, BlobServiceClient,
-     generateBlobSASQueryParameters, SASProtocol,
-   } from '@azure/storage-blob';
+### Equivalencia AWS S3
 
-   const svc = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING!);
-   const container = svc.getContainerClient('uploads');
-   const blobName = `${userId}/${crypto.randomUUID()}-${filename}`;
-   const blob = container.getBlobClient(blobName);
-
-   const sas = generateBlobSASQueryParameters({
-     containerName: 'uploads',
-     blobName,
-     permissions: BlobSASPermissions.parse('cw'),     // create + write
-     startsOn: new Date(Date.now() - 60_000),
-     expiresOn: new Date(Date.now() + 15 * 60_000),   // 15 min
-     protocol: SASProtocol.Https,
-   }, svc.credential).toString();
-
-   return { uploadUrl: `${blob.url}?${sas}`, blobUrl: blob.url };
-   ```
-
-6. **Read SAS para descarga**: mismo patrón pero `BlobSASPermissions.parse('r')`, expiración al momento de servir (≤ 5 min).
-
-7. **Seguridad**:
-   - Contenedor **privado**.
-   - SAS cortas (≤ 15 min write, ≤ 5 min read).
-   - Forzar HTTPS (`SASProtocol.Https`).
-   - Validar `contentType` y tamaño máximo en el endpoint de confirmación.
-   - Nunca enviar al cliente la storage account key ni la connection string.
-
-8. **Equivalencia con AWS S3** (por si se migra):
-   | Azure Blob | AWS S3 |
-   |------------|--------|
-   | Storage Account | Bucket |
-   | Container | (prefijo / subpath) |
-   | SAS token | Presigned URL |
-   | `@azure/storage-blob` | `@aws-sdk/s3-request-presigner` |
-   | `generateBlobSASQueryParameters` | `getSignedUrl` |
-
-9. **Alternativa sin SAS (no recomendada)**: cliente → backend → blob. Añade carga al server y dobla el ancho de banda. SAS evita ese costo.
-
-### Estado actual
-- ❌ No hay endpoints `/api/storage/*` en el código
-- ❌ No hay módulo `storage/`
-- ❌ `@azure/storage-blob` no está instalado
-- ✅ Estructura del bounded context prevista
-- ✅ Diagrama y pasos listos para exposición oral
-
----
+| Azure Blob | AWS S3 |
+|------------|--------|
+| Storage Account | Bucket |
+| Container | Prefijo/subpath |
+| SAS token | Presigned URL |
+| `@azure/storage-blob` | `@aws-sdk/s3-request-presigner` |
 
 ## Licencia
+
 MIT.
