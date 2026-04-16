@@ -45,6 +45,24 @@ export function createApp(): Express {
     }),
   );
 
+  app.get('/', (_req, res) => {
+    res.json({
+      name: 'Prueba Tecnica Humath - Backend API',
+      version: '1.0.0',
+      endpoints: {
+        health: '/health',
+        ready: '/ready',
+        docs: '/api/docs',
+        externalData: '/external-data',
+        authRegister: 'POST /api/auth/register',
+        authLogin: 'POST /api/auth/login',
+        authMe: 'GET /api/auth/me (Bearer JWT)',
+        marketQuote: 'GET /api/market/quote/:symbol (Bearer JWT)',
+        marketDaily: 'GET /api/market/daily/:symbol (Bearer JWT)',
+      },
+    });
+  });
+
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok' });
   });
