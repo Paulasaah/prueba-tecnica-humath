@@ -7,6 +7,8 @@ import rateLimit from 'express-rate-limit';
 import { logger } from './common/logger';
 import { errorHandler } from './common/error-handler';
 import { AppDataSource } from './common/database';
+import { AuthController } from './modules/auth/auth.controller';
+import { MarketController } from './modules/market/market.controller';
 
 export function createApp(): Express {
   const app = express();
@@ -28,8 +30,7 @@ export function createApp(): Express {
   app.use(
     pinoHttp({
       logger,
-      genReqId: (req) =>
-        req.headers['x-request-id']?.toString() ?? crypto.randomUUID(),
+      genReqId: (req) => req.headers['x-request-id']?.toString() ?? crypto.randomUUID(),
     }),
   );
 
@@ -45,6 +46,9 @@ export function createApp(): Express {
       res.status(503).json({ status: 'degraded' });
     }
   });
+
+  app.use('/api/auth', new AuthController().router);
+  app.use('/api/market', new MarketController().router);
 
   app.use(errorHandler);
   return app;
