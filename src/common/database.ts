@@ -11,6 +11,6 @@ export const AppDataSource = new DataSource({
   ssl: useSsl ? { rejectUnauthorized: false } : false,
   entities: [User, MarketQueryLog],
   migrations: ['dist/migrations/*.js'],
-  synchronize: process.env.NODE_ENV === 'development',
+  synchronize: process.env.DB_SYNC === 'true' || process.env.NODE_ENV === 'development',
   logging: false,
 });

@@ -17,7 +17,14 @@ import { MarketController } from './modules/market/market.controller';
 export function createApp(): Express {
   const app = express();
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+      crossOriginOpenerPolicy: false,
+      originAgentCluster: false,
+    }),
+  );
   app.use(cors());
   app.use(compression());
 
@@ -54,7 +61,14 @@ export function createApp(): Express {
   const marketCtrl = new MarketController();
   app.get('/external-data', marketCtrl.externalData);
 
-  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
+  app.get('/api/docs/swagger.json', (_req, res) => {
+    res.json(openApiSpec);
+  });
+  app.use(
+    '/api/docs',
+    swaggerUi.serve,
+    swaggerUi.setup(openApiSpec, { swaggerOptions: { url: '/api/docs/swagger.json' } }),
+  );
   app.use('/api/auth', authRouter());
   app.use('/api/market', marketRouter());
 
